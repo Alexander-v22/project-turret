@@ -37,4 +37,4 @@ This project was designed as a practical way to:
 - The repository is self-contained and actively maintained, with room for growth into more advanced robotic control systems.
 
 ## Author
-Alexander Valdovinos MEna.
+Alexander Valdovinos Mena.
