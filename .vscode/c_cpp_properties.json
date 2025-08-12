@@ -1,0 +1,29 @@
+{
+  "configurations": [
+    {
+      "name": "ESP32",
+      "compilerPath": "C:/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-g++.exe",
+      "cStandard": "c11",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "gcc-x64",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "C:/Espressif/frameworks/esp-idf-v5.5/components/**",
+        "C:/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/include",
+        "C:/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0/include",
+        "C:/Espressif/frameworks/esp-idf-v5.5/components/newlib/platform_include"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "C:/Espressif/frameworks/esp-idf-v5.5/components"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      },
+      "defines": [
+        "ESP_PLATFORM"
+      ]
+    }
+  ],
+  "version": 4
+}
