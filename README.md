@@ -1,6 +1,6 @@
 # Turret Control Project
 
-This project is an ESP32-based turret system built using the ESP-IDF framework. It uses servo motors for pan and tilt control, allowing the turret to sweep an area and return to a centered position. This is the foundational layer for an interactive, automated turret system — suitable for future integration with sensors, tracking algorithms, or remote control interfaces.
+This project is an ESP32-based turret system built using the ESP-IDF framework. It uses servo motors for pan and tilt control, allowing the turret to sweep an area and return to a centered position. This is the foundational layer for an interactive, automated turret system suitable for future integration with sensors, tracking algorithms, or remote control interfaces.
 
 ___
 
@@ -37,4 +37,4 @@ This project was designed as a practical way to:
 - The repository is self-contained and actively maintained, with room for growth into more advanced robotic control systems.
 
 ## Author
-Alexander Valdovinos MEna.
+Alexander Valdovinos Mena.
