@@ -4,29 +4,52 @@ extern "C" {
     #include "driver/ledc.h"
     #include "esp_err.h"
     #include "driver/adc.h" //needed for the joystick
+
+    #include "nvs_flash.h"
+    #include "esp_netif.h"
+    #include "esp_event.h"
+    #include "esp_wifi.h"
+    #include "esp_http_server.h"
+    #include "esp_timer.h"
 }
 
 #include <cstdint>  // For uint32_t, uint8_t
 #include <cstdio>
 
+#include <cstring>
+#include <cstdlib>
+
+
 // DEFINING SERVROS PAN AND TILT FOR TURRET
 #define SERVO_PAN_GPIO 18
 #define SERVO_TILT_GPIO 19
+// NEEDED FOR THE ESP32 TO SEND SIGNALS TO TURN 
+#define SERVO_MIN_US 500
+#define SERVO_MAX_US 2500
+// STANDARD PWM FREQUENCY
+#define SERVO_FREQ_HZ 50
+// ESP32 HAS A LECD TIMER NEED FOR PWM OUTPUT CHANNEL
+#define SERVO_TIMER LEDC_TIMER_0 
+// FOR SMOOTH AND PRECISE CONTROL 
+#define SERVO_RES LEDC_TIMER_16_BIT 
+
+
+// DEFINING MY PINS TO ANALOG TO DIGITIAL CONVERTERS
 #define JOY_X_PIN ADC1_CHANNEL_4
 #define JOY_Y_PIN ADC1_CHANNEL_5
 
-// NEEDED FOR THE ESP32 TO SEND SIGNALS TO TURN 
-#define SERVO_MIN_US 500
-#define SERVO_MAX_US 2500 
 
-// STANDARD PWM FREQUENCY
-#define SERVO_FREQ_HZ 50
 
-// ESP32 HAS A LECD TIMER NEED FOR PWM OUTPUT CHANNEL
-#define SERVO_TIMER LEDC_TIMER_0 
+//========= WIFI SETTINGS ===========
+#define WIFI_SSID "<REMOVED>"
+#define WIFI_PASSWORD "<REMOVED>"// need to change 
 
-// FOR SMOOTH AND PRECISE CONTROL 
-#define SERVO_RES LEDC_TIMER_16_BIT 
+
+// ws server settings 
+#define WS_PORT 81
+#define WS_PATH "/ws"
+
+
 
 // Converts servo angle (0–180°) to LEDC duty cycle (Q16 format) based on pulse width (1000–2000 us)
 uint32_t angle_to_duty_us (uint8_t angle){
@@ -39,23 +62,23 @@ uint8_t map_range(int x, int in_min, int in_max, int out_min, int out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-extern "C" void app_main(void) {
-
-    adc1_config_width(ADC_WIDTH_BIT_12); // gives us  4095 possible values the analog value can be 
-    adc1_config_channel_atten(JOY_X_PIN, ADC_ATTEN_DB_11); // Configures the volates rand the ADC can read from 
-    adc1_config_channel_atten(JOY_Y_PIN, ADC_ATTEN_DB_11);
-
-    //MAP JOYSTICK POSITION TO SERVO ANGLE 
-    //Gets the raw analog data form the joystick so that we can map it to our servos
-    int joy_x = adc1_get_raw(JOY_X_PIN);
-    int joy_y = adc1_get_raw(JOY_Y_PIN);
-
-    // map_range # onto the servo
-    uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
-    uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 180);
 
 
-    //PWM timer on the ESP32 using the lEDC peripheral to control the frequency and resolution of the PWM singal
+//=========== ALL OF THESE ARE SETUPS==================
+
+// Creating a servo SET UP to free up space in the main
+static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
+    uint32_t dpan = angle_to_duty_us(deg_pan);
+    uint32_t dtilt = angle_to_duty_us(deg_tilt);
+
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dpan); //loads the value
+    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0); // Applies the value and sends it to the servo
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, dtilt);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
+}
+// PWM SET up for servo 
+static void setup_ledc(void) {
+     //PWM timer on the ESP32 using the lEDC peripheral to control the frequency and resolution of the PWM singal
     ledc_timer_config_t timer = {}; 
         timer.duty_resolution = SERVO_RES;
         timer.freq_hz = SERVO_FREQ_HZ;
@@ -87,9 +110,60 @@ extern "C" void app_main(void) {
         tilt.hpoint = 0; //
         tilt.timer_sel = SERVO_TIMER;
     ledc_channel_config(&tilt);
+}
+// ADC SET up for joystick
+static void setup_adc(void){
+    adc1_config_width(ADC_WIDTH_BIT_12); // gives us  4095 possible values the analog value can be 
+    adc1_config_channel_atten(JOY_X_PIN, ADC_ATTEN_DB_11); // Configures the volates rand the ADC can read from 
+    adc1_config_channel_atten(JOY_Y_PIN, ADC_ATTEN_DB_11);
+}
+
+
+//=================WIFI SETUP==========================
+
+static void wifi_init_sta(void) {
+    ESP_ERROR_CHECK(nvs_flash_init()); //non-volitale storage needed for my wifi credentials to be stores to lvie through a reboot
+    ESP_ERROR_CHECK(esp_netif_init()); // prepares the network interface e.g handles ip address, network, and connections 
+    ESP_ERROR_CHECK(esp_event_loop_create_default()); // ESP32 can react to things such as wifi conected or got ip address 
+    esp_netif_create_default_wifi_sta(); // creates wifi station instead of a wifi AP mode (esp32 chip acts like a router)
+
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // THIS IS FILLING THE REQUIREMENTS NEED TO ACCESS THE WIFI 
+    wifi_config_t wifi_config = {};
+        std::snprintf((char*)wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", WIFI_SSID);
+        std::snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASSWORD);
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK ;
+
+    //
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));// connects to the wifi instead of staring one 
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_connect());
+    //applyies the config, start the WIFI hardware, and attempts connections
+
+    ESP_LOGI(TAG, "Wi-Fi STA starting… connect to %s", WIFI_SSID);
+
+}
+
+extern "C" void app_main(void) {
+
+    setup_ledc();
+    setup_adc();
+
+
+    //MAP JOYSTICK POSITION TO SERVO ANGLE 
+    //Gets the raw analog data form the joystick so that we can map it to our servos
+    int joy_x = adc1_get_raw(JOY_X_PIN);
+    int joy_y = adc1_get_raw(JOY_Y_PIN);
+
+    // map_range # onto the servo
+    uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
+    uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 180);
 
     while(1){
-
         int joy_x = adc1_get_raw(JOY_X_PIN);
         int joy_y = adc1_get_raw(JOY_Y_PIN);
 
@@ -101,11 +175,7 @@ extern "C" void app_main(void) {
         uint32_t duty_pan = angle_to_duty_us(pan_angle); //converts the angle to a PWM signal 
         uint32_t duty_tilt = angle_to_duty_us(tilt_angle);  
 
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty_pan); //loads the value
-        ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0); // Applies the value and sends it to the servo
-
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty_tilt);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
+        servo_startup(pan_angle, tilt_angle);
 
         vTaskDelay(pdMS_TO_TICKS(30));
     
