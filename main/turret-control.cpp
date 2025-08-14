@@ -3,7 +3,8 @@ extern "C" {
     #include "freertos/task.h"
     #include "driver/ledc.h"
     #include "esp_err.h"
-    #include "driver/adc.h" //needed for the joystick
+    #include "esp_adc/adc_oneshot.h" //needed for the joystick
+    #include "esp_log.h"
 
     #include "nvs_flash.h"
     #include "esp_netif.h"
@@ -11,6 +12,9 @@ extern "C" {
     #include "esp_wifi.h"
     #include "esp_http_server.h"
     #include "esp_timer.h"
+    #include "secrets.h"
+    #include "esp_mac.h"
+
 }
 
 #include <cstdint>  // For uint32_t, uint8_t
@@ -35,20 +39,17 @@ extern "C" {
 
 
 // DEFINING MY PINS TO ANALOG TO DIGITIAL CONVERTERS
-#define JOY_X_PIN ADC1_CHANNEL_4
-#define JOY_Y_PIN ADC1_CHANNEL_5
-
+#define JOY_X_PIN ADC_CHANNEL_4
+#define JOY_Y_PIN ADC_CHANNEL_5
 
 
 //========= WIFI SETTINGS ===========
-#define WIFI_SSID "<REMOVED>"
-#define WIFI_PASSWORD "<REMOVED>"// need to change 
-
 
 // ws server settings 
 #define WS_PORT 81
 #define WS_PATH "/ws"
 
+static const char* TAG = "WIFI";
 
 
 // Converts servo angle (0–180°) to LEDC duty cycle (Q16 format) based on pulse width (1000–2000 us)
@@ -111,13 +112,31 @@ static void setup_ledc(void) {
         tilt.timer_sel = SERVO_TIMER;
     ledc_channel_config(&tilt);
 }
+
+
+// ===== ADC oneshot state (replaces legacy driver/adc.h) =====
+static adc_oneshot_unit_handle_t s_adc1 = nullptr;
+
 // ADC SET up for joystick
 static void setup_adc(void){
-    adc1_config_width(ADC_WIDTH_BIT_12); // gives us  4095 possible values the analog value can be 
-    adc1_config_channel_atten(JOY_X_PIN, ADC_ATTEN_DB_11); // Configures the volates rand the ADC can read from 
-    adc1_config_channel_atten(JOY_Y_PIN, ADC_ATTEN_DB_11);
-}
+    // adc1_config_width(ADC_WIDTH_BIT_12); // gives us  4095 possible values the analog value can be 
+    // adc1_config_channel_atten(JOY_X_PIN, ADC_ATTEN_DB_11); // Configures the volates rand the ADC can read from 
+    // adc1_config_channel_atten(JOY_Y_PIN, ADC_ATTEN_DB_11);
 
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &s_adc1));
+
+    adc_oneshot_chan_cfg_t ch_cfg = {
+        .atten = ADC_ATTEN_DB_11,
+        .bitwidth = ADC_BITWIDTH_DEFAULT, // 12-bit effective on ESP32
+    };
+    // JOY_X_PIN / JOY_Y_PIN are ADC1_CHANNEL_*; cast to adc_channel_t
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, (adc_channel_t)JOY_X_PIN, &ch_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, (adc_channel_t)JOY_Y_PIN, &ch_cfg));
+}
+git 
 
 //=================WIFI SETUP==========================
 
@@ -137,7 +156,7 @@ static void wifi_init_sta(void) {
         std::snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASSWORD);
         wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK ;
 
-    //
+    
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));// connects to the wifi instead of staring one 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -156,16 +175,22 @@ extern "C" void app_main(void) {
 
     //MAP JOYSTICK POSITION TO SERVO ANGLE 
     //Gets the raw analog data form the joystick so that we can map it to our servos
-    int joy_x = adc1_get_raw(JOY_X_PIN);
-    int joy_y = adc1_get_raw(JOY_Y_PIN);
+    // int joy_x = adc1_get_raw(JOY_X_PIN);
+    // int joy_y = adc1_get_raw(JOY_Y_PIN);
+    int joy_x = 0;
+    int joy_y = 0;
+    ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
+    ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
     // map_range # onto the servo
     uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
     uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 180);
 
     while(1){
-        int joy_x = adc1_get_raw(JOY_X_PIN);
-        int joy_y = adc1_get_raw(JOY_Y_PIN);
+        // int joy_x = adc1_get_raw(JOY_X_PIN);
+        // int joy_y = adc1_get_raw(JOY_Y_PIN);
+        ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
+        ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
         //linear mappings from the ADC range to servo angle range
         uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
@@ -181,5 +206,3 @@ extern "C" void app_main(void) {
     
     }
 }
-    
-    
