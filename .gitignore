@@ -13,3 +13,7 @@ __pycache__/
 
 # Secret credentials
 secrets.h
+WebSocket&HTTP-code.h
+servo-code.h
+joystick-code.h
+wifi-code.h

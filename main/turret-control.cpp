@@ -8,8 +8,8 @@
     
 2.) improve wifi feedback
 
-
-
+3.) alter the WS and HTTP funcions to read the JSON yaw and pitch 
+then give it to the servos 
 
 */
 
@@ -88,17 +88,6 @@ uint8_t map_range(int x, int in_min, int in_max, int out_min, int out_max) {
 
 //=========== ALL OF THESE ARE SETUPS FOR SERVO USE==================
 
-// Creating a servo SET UP to free up space in the main
-static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
-    uint32_t dpan = angle_to_ledc_counts(deg_pan);
-    uint32_t dtilt = angle_to_ledc_counts(deg_tilt);
-
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dpan); //loads the value
-    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0); // Applies the value and sends it to the servo
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, dtilt);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
-}
-// PWM SET up for servo 
 static void setup_ledc(void) {
      //PWM timer on the ESP32 using the lEDC peripheral to control the frequency and resolution of the PWM singal
     ledc_timer_config_t timer = {}; 
@@ -134,17 +123,23 @@ static void setup_ledc(void) {
     ledc_channel_config(&tilt);
 }
 
+static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
+    uint32_t dpan = angle_to_ledc_counts(deg_pan);
+    uint32_t dtilt = angle_to_ledc_counts(deg_tilt);
+
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dpan); //loads the value
+    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0); // Applies the value and sends it to the servo
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, dtilt);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
+}
+
+
 
 // ===== ADC oneshot state (replaces legacy driver/adc.h) =====
 static adc_oneshot_unit_handle_t s_adc1 = nullptr;
 
-// ADC SET up for joystick
 static void setup_adc(void){
 
-
-    // adc1_config_width(ADC_WIDTH_BIT_12); // gives us  4095 possible values the analog value can be 
-    // adc1_config_channel_atten(JOY_X_PIN, ADC_ATTEN_DB_11); // Configures the volates rand the ADC can read from 
-    // adc1_config_channel_atten(JOY_Y_PIN, ADC_ATTEN_DB_11);
 
     adc_oneshot_unit_init_cfg_t unit_cfg = {
         .unit_id = ADC_UNIT_1,
@@ -164,22 +159,23 @@ static void setup_adc(void){
 
 //=================WIFI SETUP==========================
 
-static void wifi_init_sta(void) {
-    ESP_ERROR_CHECK(nvs_flash_init()); //non-volitale storage needed for my wifi credentials to be stores to live through a reboot
+static void wifi_init_sta(void) { 
 
-    /* prepares the network interface e.g handles ip address, network, and connections
-    (A.K.A TCP/IP stack)*/
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default()); //  delivers WIFI_EVENT / IP_EVENT callbaks
+    // 1. Wi-Fi/LwIP initiation phase 
+
+    ESP_ERROR_CHECK(nvs_flash_init()); //non-volitale storage needed for my wifi credentials to be stores to live through a reboot
+    ESP_ERROR_CHECK(esp_netif_init());  //prepares the network interface e.g handles ip address, network, and connections (A.K.A TCP/IP stack)
+    ESP_ERROR_CHECK(esp_event_loop_create_default()); //  delivers WIFI_EVENT / IP_EVENT callbaks: event loop
 
     /* Creates the default Wi-Fi station (STA) network interface and bind it
    to the Wi-Fi driver. */
     esp_netif_create_default_wifi_sta(); 
 
     // initailizes the wifi driver with default configuration 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    wifi_init_config_t wifi_initiation = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wifi_initiation));
 
+    // 2. Wi-Fi Configuartion phase
 
     /* Fill in STA credentials and policy. Copy SSID/password into the config struct. Sets a minimum authmode (rejects open/WEP APs) */
     wifi_config_t wifi_config = {};
@@ -187,19 +183,20 @@ static void wifi_init_sta(void) {
         std::snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASSWORD);
         wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK ;
 
+    
     /* Puts the driver in STA(client) mode and applies the config we coded */
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));// connects to the wifi instead of staring one 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
-    ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_connect());
+    //3. start phase 
+    ESP_ERROR_CHECK(esp_wifi_start()); 
 
+    //4. wifi connect phase
+    ESP_ERROR_CHECK(esp_wifi_connect()); 
 
     ESP_LOGI(TAG_WIFI, "Wi-Fi STA starting… connect to %s", WIFI_SSID);
 }
 
-
-// Creating a basic webSocket server handler
 
 
 //==========CREATED THE ""HTTP OPENER"=============
@@ -207,48 +204,50 @@ static httpd_handle_t g_server = nullptr;
 static esp_err_t ws_handler(httpd_req_t* req);
 
 static void start_ws_server(){
-    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
 
-    cfg.server_port = 81;
+    httpd_config_t httpd_server_config = HTTPD_DEFAULT_CONFIG(); // loads a default HTTP server config 
+    httpd_server_config.server_port = 81; // Runs the HTTP server on port 81
 
-    ESP_ERROR_CHECK(httpd_start(&g_server, &cfg)); //starts a tiny web server on the ESP32 (we set the port to 81).
+    ESP_ERROR_CHECK(httpd_start(&g_server, &httpd_server_config)); 
+    //starts a tiny web server on the ESP32 
     /*WebSockets run on top of HTTP. You need the HTTP server alive before any WS connection can exist.*/
 
 
     // This is simply a URI Path like a handler 
     static httpd_uri_t ws_uri = {};
-        ws_uri.uri = "/ws" ;
-        ws_uri.method = HTTP_GET;
-        ws_uri.handler = ws_handler;
-        ws_uri.user_ctx = nullptr;
-        ws_uri.is_websocket = true;
+        ws_uri.uri = "/ws" ;            // assigns the URI path to the handler
+        ws_uri.method = HTTP_GET;       // WebSocket upgrade begins with a GET request
+        ws_uri.handler = ws_handler;    // Function to handle WebSocket events (ws-handler)
+        ws_uri.user_ctx = nullptr;      // Sets the user context data to nullptr
+        ws_uri.is_websocket = true;     // Very important, this indicates that this URI handler is a for a WebScoket connection
 
+        // register the WS URI handler with the server
         ESP_ERROR_CHECK(httpd_register_uri_handler(g_server,&ws_uri));
-
 }
 
-
 //===========CREATED A BASIC WEBSOCKET===========
-// simple test to make sure we can connect a WebSocket
+// ws_handler invoked when ESP32 chips attempts to connect to the WebSocket URI 
+
 static esp_err_t ws_handler(httpd_req_t* req){
 
-
-    if (req ->method == HTTP_GET){
+    //  Responsible for signifying the intial HTTP request for a connection upgrade 
+    if (req -> method == HTTP_GET){
         ESP_LOGI(TAG_WS, "WS Handshake");
         return ESP_OK;
     }
 
-    httpd_ws_frame_t frame = {} ;
-    frame.type = HTTPD_WS_TYPE_TEXT;
+    httpd_ws_frame_t frame = {} ; // A httpd_ws_frame_t structure is initialized to hold information about the incoming WebSocket frame.
+    frame.type = HTTPD_WS_TYPE_TEXT; // Payload will be interpreted as UTF-8 text (text data), since were using JSON. "OPCODE"
 
-    // probe length of the incomeing frame
-    ESP_ERROR_CHECK(httpd_ws_recv_frame(req, &frame, 0));
-    if (frame.len == 0 ) return ESP_OK; // no date in the frame "making sure we get a connection"
+    /* 1. Probes the length of the incoming frame and only fill the frame.len with the actaul length
+    of the WebSokcet Frame without recieving the actual payload data yet */ 
 
-    // simple fixed buffer and check bounds is need to make this work 
-  
-    uint8_t buf[256]; 
-    // allocate buffer baed on the actual frame length 
+    ESP_ERROR_CHECK(httpd_ws_recv_frame(req, &frame, 0)); //httpd_ws_recv_frame "Probes" the incoming frame's 
+    if (frame.len == 0 ) return ESP_OK; // if frame.len == 0 then no data in the frame
+    
+
+    /* 2. reads the payload safely into a fixed buffer */
+    uint8_t buf[256]; // store WebSocket payload
     if(frame.len >= sizeof(buf)){
         ESP_LOGW(TAG_WS, "Frame to large: %u max(%u)", (unsigned)frame.len, (unsigned)sizeof(buf) - 1);
         return ESP_ERR_INVALID_SIZE;
@@ -258,11 +257,9 @@ static esp_err_t ws_handler(httpd_req_t* req){
     ESP_ERROR_CHECK(httpd_ws_recv_frame(req, &frame,frame.len));
     buf[frame.len] = 0;
 
-    //PRINT OUT RESULT 
     ESP_LOGI(TAG_WS, "RX: %s", buf);
 
-
-    //simpley getting the same text back
+    // 3. Echo back the smae payload as a TEXT frame
     httpd_ws_frame_t tx_frame = {};
         tx_frame.final=true;
         tx_frame.type = HTTPD_WS_TYPE_TEXT;
@@ -271,7 +268,6 @@ static esp_err_t ws_handler(httpd_req_t* req){
     ESP_ERROR_CHECK(httpd_ws_send_frame(req, &tx_frame));
 
     return ESP_OK;
-
 }
 
 
