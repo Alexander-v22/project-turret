@@ -1,15 +1,24 @@
 /*
-=======Things to do========
-
+=======IMPROVEMNTS========
 1.) add joystick improvemnts 
     * joystick dead zones
     * smoothness for contorl 
     * calibration 
     
-2.) improve wifi feedback
+2.) improve wifi feedback (DONE)
 
-3.) alter the WS and HTTP funcions to read the JSON yaw and pitch 
+=======TODO LIST========
+
+0.5.) (OPTIONAL) added a mode switching between head control and joystick
+
+1.) alter the WS and HTTP funcions to read the JSON yaw and pitch 
 then give it to the servos 
+
+2.) add a LCD to display the mode that the turret is in
+
+3.) add a LED that turns on and off when you blink
+    * also trigger this when click on the joystick
+
 
 */
 
@@ -18,12 +27,12 @@ extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/task.h"
     #include "driver/ledc.h"
+    #include "driver/gpio.h"
     #include "esp_err.h"
     #include "esp_adc/adc_oneshot.h" //needed for the joystick
     #include "esp_log.h"
 
     #include "nvs_flash.h"
-
     #include "esp_netif.h"
     #include "esp_event.h"
     #include "esp_wifi.h"
@@ -32,9 +41,11 @@ extern "C" {
     #include "esp_mac.h"
 
     #include "sdkconfig.h"
-    
+
 
     #include "secrets.h"
+
+
 }
 
 #include <cstdint>  // For uint32_t, uint8_t
@@ -42,6 +53,10 @@ extern "C" {
 
 #include <cstring>
 #include <cstdlib>
+
+#include <vector>
+#include <algorithm>
+
 
 
 // DEFINING SERVROS PAN AND TILT FOR TURRET
@@ -63,13 +78,40 @@ extern "C" {
 #define JOY_Y_PIN ADC_CHANNEL_5
 
 
-//========= WIFI SETTINGS ===========
+//DEFINING PUSH BUTTONS GPIO PINS
+
+#define BLUE_BTN GPIO_NUM_35
+#define RED_BTN GPIO_NUM_34
+
+#define RED_LED_GPIO GPIO_NUM_23
+#define BLUE_LED_GPIO GPIO_NUM_22
+
+
+
+//========= WIFI/WS and HTTP server ===========
 
 // ws server settings 
 #define WS_PORT 81
 #define WS_PATH "/ws"
-static const char* TAG_WIFI = "WIFI";
+static const char* TAG_WIFI = "WIFI_SETUP";
 static const char *TAG_WS = "ws";
+static const char *TAG_MODE = "MODE: ";
+
+
+//========== YAW AND PITCH ==========
+
+#define MAX_YAW 90.0
+#define MAX_PITCH 45.0
+
+//========
+
+typedef enum control_mode_t { CONTROL_MODE_JOYSTICK, CONTROL_MODE_WS}; 
+static volatile control_mode_t g_mode = CONTROL_MODE_JOYSTICK;
+
+static constexpr uint32_t WS_TIMEOUT_MS = 2000;
+static volatile uint8_t g_pan_angle = 90;
+static volatile uint8_t  g_tilt_angle = 90;
+static volatile uint32_t  g_last_ws_ms = 0;
 
 
 // Map angle -> pulse_us (500–2500 us at 50 Hz -> 20ms), then convert to LEDC duty counts:
@@ -84,7 +126,22 @@ uint8_t map_range(int x, int in_min, int in_max, int out_min, int out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+double map_d_range(double x, double in_min, double in_max, double out_min, double out_max) {
+    if (x < in_min) x = in_min;
+    if (x > in_max) x = in_max;
 
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+
+//maybe use this one if not create another one but with double and then round to the nearset int depends on how pitch and yaw work
+
+
+// need a ws sever refresher
+static inline uint32_t millis (){
+    return (uint32_t)(esp_timer_get_time()/1000ULL);
+}
+ 
 
 //=========== ALL OF THESE ARE SETUPS FOR SERVO USE==================
 
@@ -133,8 +190,6 @@ static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
 }
 
-
-
 // ===== ADC oneshot state (replaces legacy driver/adc.h) =====
 static adc_oneshot_unit_handle_t s_adc1 = nullptr;
 
@@ -157,10 +212,45 @@ static void setup_adc(void){
 }
 
 
+// getting the values from the frontend in format "EX: Yaw : 0 Pitch : 0"
+
+// break this down
+static bool json_get_number (const char* s, const char* key, double* out ){
+    const char* p  = std :: strstr(s, key);
+    if (!p) return false;
+    p = std::strchr(p, ':');
+    if(!p) return false;
+
+    char* endp = nullptr;
+    double v = std::strtod(p + 1, &endp);
+    if (endp == p + 1 )return false;
+    *out = v;
+    return true ;
+}
+
 //=================WIFI SETUP==========================
+static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    switch (event_id)
+    {
+    case WIFI_EVENT_STA_START:
+        printf("WiFi connecting ... \n");
+        break;
+    case WIFI_EVENT_STA_CONNECTED:
+        printf("WiFi connected ... \n");
+        break;
+    case WIFI_EVENT_STA_DISCONNECTED:
+        printf("WiFi lost connection ... \n");
+        break;
+    case IP_EVENT_STA_GOT_IP:
+        printf("Retrieved IP ... \n\n");
+        break;
+    default:
+        break;
+    }
+}
 
 static void wifi_init_sta(void) { 
-
     // 1. Wi-Fi/LwIP initiation phase 
 
     ESP_ERROR_CHECK(nvs_flash_init()); //non-volitale storage needed for my wifi credentials to be stores to live through a reboot
@@ -178,11 +268,12 @@ static void wifi_init_sta(void) {
     // 2. Wi-Fi Configuartion phase
 
     /* Fill in STA credentials and policy. Copy SSID/password into the config struct. Sets a minimum authmode (rejects open/WEP APs) */
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
     wifi_config_t wifi_config = {};
         std::snprintf((char*)wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", WIFI_SSID);
         std::snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", WIFI_PASSWORD);
         wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK ;
-
     
     /* Puts the driver in STA(client) mode and applies the config we coded */
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));// connects to the wifi instead of staring one 
@@ -198,10 +289,9 @@ static void wifi_init_sta(void) {
 }
 
 
-
-//==========CREATED THE ""HTTP OPENER"=============
-static httpd_handle_t g_server = nullptr;
-static esp_err_t ws_handler(httpd_req_t* req);
+//==========SETTING UP AN HTTP SERVER=============
+static httpd_handle_t g_server = nullptr; // keeps a global handle to the HTTP server instance which is need so we can later stop the server or register more endpoints
+static esp_err_t ws_handler(httpd_req_t* req); //handler funciton that will process WS events (messages)
 
 static void start_ws_server(){
 
@@ -210,7 +300,7 @@ static void start_ws_server(){
 
     ESP_ERROR_CHECK(httpd_start(&g_server, &httpd_server_config)); 
     //starts a tiny web server on the ESP32 
-    /*WebSockets run on top of HTTP. You need the HTTP server alive before any WS connection can exist.*/
+    // WebSockets run on top of HTTP. You need the HTTP server alive before any WS connection can exist 
 
 
     // This is simply a URI Path like a handler 
@@ -225,15 +315,15 @@ static void start_ws_server(){
         ESP_ERROR_CHECK(httpd_register_uri_handler(g_server,&ws_uri));
 }
 
-//===========CREATED A BASIC WEBSOCKET===========
-// ws_handler invoked when ESP32 chips attempts to connect to the WebSocket URI 
 
+//===========CREATED A WEBSOCKET JSON===========
+// ws_handler invoked when ESP32 chips attempts to connect to the WebSocket URI 
 static esp_err_t ws_handler(httpd_req_t* req){
 
     //  Responsible for signifying the intial HTTP request for a connection upgrade 
     if (req -> method == HTTP_GET){
         ESP_LOGI(TAG_WS, "WS Handshake");
-        return ESP_OK;
+        return ESP_OK; // handshake done by ersver 
     }
 
     httpd_ws_frame_t frame = {} ; // A httpd_ws_frame_t structure is initialized to hold information about the incoming WebSocket frame.
@@ -247,31 +337,54 @@ static esp_err_t ws_handler(httpd_req_t* req){
     
 
     /* 2. reads the payload safely into a fixed buffer */
-    uint8_t buf[256]; // store WebSocket payload
-    if(frame.len >= sizeof(buf)){
-        ESP_LOGW(TAG_WS, "Frame to large: %u max(%u)", (unsigned)frame.len, (unsigned)sizeof(buf) - 1);
-        return ESP_ERR_INVALID_SIZE;
-    }    
-
-    frame.payload = buf;
+    // break this down
+    std::vector<uint8_t> buf(frame.len + 1);
+    frame.payload = buf.data();
     ESP_ERROR_CHECK(httpd_ws_recv_frame(req, &frame,frame.len));
     buf[frame.len] = 0;
+    g_last_ws_ms = millis();
 
-    ESP_LOGI(TAG_WS, "RX: %s", buf);
+    if (g_mode != CONTROL_MODE_WS){
+        return ESP_OK;
+    }
 
-    // 3. Echo back the smae payload as a TEXT frame
-    httpd_ws_frame_t tx_frame = {};
-        tx_frame.final=true;
-        tx_frame.type = HTTPD_WS_TYPE_TEXT;
-        tx_frame.payload = buf;
-        tx_frame.len = frame.len;
-    ESP_ERROR_CHECK(httpd_ws_send_frame(req, &tx_frame));
+    const char * msg = reinterpret_cast<const char*>(buf.data());
+    ESP_LOGI(TAG_WS, "msg=%s", msg);
+
+    // break this down
+
+    double yaw_degrees = 0.0;
+    double pitch_degrees = 0.0; 
+
+    // break this down
+
+    const bool has_yaw =json_get_number(msg,  "yaw", &yaw_degrees);
+    const bool has_pitch =json_get_number(msg,  "pitch", &pitch_degrees);
+
+    // break this down
+
+    if (has_yaw && has_pitch){
+        const double pan_yaw = map_d_range(yaw_degrees, -MAX_YAW, +MAX_YAW, 0.0, 180);
+        const double tilt_pitch = map_d_range(pitch_degrees, -MAX_PITCH, +MAX_PITCH, 0.0, 180);
+
+        int pan = static_cast<int>(pan_yaw + 0.5);
+        int tilt = static_cast<int>(tilt_pitch + 0.5);
+
+        pan = std::clamp(pan, 0, 175); // might change this value to 175 servo jams when fully going to 180
+        tilt = std::clamp(tilt, 0 ,175);
+
+        g_pan_angle = static_cast<uint8_t>(pan);
+        g_tilt_angle = static_cast<uint8_t>(tilt);
+        g_mode = CONTROL_MODE_WS; 
+        g_last_ws_ms = millis();
+    
+        ESP_LOGI(TAG_WS, "has_yaw=%d, has_pitch=%d, yaw=%.2f, pitch=%.2f", has_yaw, has_pitch, yaw_degrees, pitch_degrees);
+
+
+    }
 
     return ESP_OK;
 }
-
-
-
 
 extern "C" void app_main(void) {
 
@@ -281,33 +394,58 @@ extern "C" void app_main(void) {
     wifi_init_sta();
     start_ws_server();
 
+    gpio_set_direction(RED_LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_direction(RED_BTN, GPIO_MODE_INPUT);
 
-    //MAP JOYSTICK POSITION TO SERVO ANGLE 
-    //Gets the raw analog data form the joystick so that we can map it to our servos
-    // int joy_x = adc1_get_raw(JOY_X_PIN);
-    // int joy_y = adc1_get_raw(JOY_Y_PIN);
+    gpio_set_direction(BLUE_LED_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_direction(BLUE_BTN, GPIO_MODE_INPUT);
+
+  
     int joy_x = 0;
     int joy_y = 0;
     ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
     ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
     // map_range # onto the servo
-    uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
-    uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 180);
+    uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,175);
+    uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 175);
 
     while(1){
-        // int joy_x = adc1_get_raw(JOY_X_PIN);
-        // int joy_y = adc1_get_raw(JOY_Y_PIN);
+    
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
         //linear mappings from the ADC range to servo angle range
-        uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,180);
-        uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 180);
+        uint8_t pan_angle_js = map_range(joy_x, 0 , 4095, 175 ,0 );
+        uint8_t tilt_angle_js = map_range(joy_y, 0, 4095, 0, 175);
 
-        //convers angles to PWM duty (Q16 format) and is applied every loop to continue sending the PWM singal to the ESP32 
-        uint32_t duty_pan = angle_to_ledc_counts(pan_angle); //converts the angle to a PWM signal 
-        uint32_t duty_tilt = angle_to_ledc_counts(tilt_angle);  
+        uint32_t now = millis();
+
+         if(gpio_get_level(RED_BTN) == 1){
+            gpio_set_level(RED_LED_GPIO, 1);
+            gpio_set_level(BLUE_LED_GPIO, 0);
+            
+            g_mode = CONTROL_MODE_JOYSTICK ;
+
+            ESP_LOGW( TAG_MODE, "JOYSTICK");
+            
+
+        } else if (gpio_get_level(BLUE_BTN) == 1 ){
+            gpio_set_level(BLUE_LED_GPIO, 1);
+            gpio_set_level(RED_LED_GPIO, 0);
+
+            g_mode = CONTROL_MODE_WS;
+            ESP_LOGW( TAG_MODE, "HEAD CONTROL");
+        } 
+
+        if(g_mode == CONTROL_MODE_WS && (now - g_last_ws_ms)> WS_TIMEOUT_MS) {
+            g_mode = CONTROL_MODE_JOYSTICK;
+            ESP_LOGW(TAG_WS,"WS Timeout switching into JOYSTICK MODE");
+        }
+
+
+        uint8_t pan_angle  = (g_mode == CONTROL_MODE_WS) ? g_pan_angle  : pan_angle_js;
+        uint8_t tilt_angle = (g_mode == CONTROL_MODE_WS) ? g_tilt_angle : tilt_angle_js;
 
         servo_startup(pan_angle, tilt_angle);
 
