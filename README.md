@@ -1,40 +1,131 @@
 # Turret Control Project
 
-This project is an ESP32-based turret system built using the ESP-IDF framework. It uses servo motors for pan and tilt control, allowing the turret to sweep an area and return to a centered position. This is the foundational layer for an interactive, automated turret system suitable for future integration with sensors, tracking algorithms, or remote control interfaces.
+![C](https://img.shields.io/badge/Language-C-blue)
+![ESP-IDF](https://img.shields.io/badge/Framework-ESP--IDF-green)
+![FreeRTOS](https://img.shields.io/badge/RTOS-FreeRTOS-orange)
+![WiFi](https://img.shields.io/badge/Connectivity-WiFi-lightgrey)
+![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-purple)
 
-___
 
-##  Purpose
+An ESP32-based dual-axis turret system built on the ESP-IDF framework and FreeRTOS.  
+The system uses servo motors for pan and tilt control, supports manual input via joystick, and provides a Wi-Fi + WebSocket interface for remote real-time control. This project demonstrates embedded systems design across hardware control, signal processing, networking, and system integration.
 
-The primary goal of this project is to build a modular, real-time embedded control system using modern IoT development tools. It simulates a surveillance or targeting turret that can sweep an area and reset, providing the groundwork for more advanced features such as object detection, computer vision integration, or remote (web/mobile) control.
+---
 
-This project was designed as a practical way to:
-- Deepen familiarity with **embedded systems programming** using **ESP-IDF**
-- Gain hands-on experience with **FreeRTOS task scheduling**
-- Understand **servo motor control** using PWM signals
-- Develop clean, modular firmware for microcontroller-based systems
+## Demo
+
+| Turret Sweep | Joystick Control | WebSocket Control |
+|--------------|-----------------|-------------------|
+| (Insert GIF here) | (Insert GIF here) | (Insert GIF here) |
+
+Video Walkthrough: [YouTube Demo](https://youtu.be/your-demo-link)
+
+---
+
+## Purpose
+
+The primary goal of this project is to build a modular, real-time embedded control system on the ESP32 platform. It simulates a pan-tilt turret for surveillance or targeting, laying the foundation for more advanced features such as:
+
+- Object detection and computer vision (e.g., ESP32-CAM + OpenCV/TinyML)
+- Sensor-based automation (IR, ultrasonic, or PIR tracking)
+- Interactive remote control via web, mobile, or joystick
+
+This project was designed to:
+
+- Deepen familiarity with embedded systems programming using ESP-IDF
+- Gain hands-on experience with FreeRTOS task scheduling
+- Explore servo control via PWM (LEDC hardware peripheral)
+- Implement real-time networking with WebSockets
+- Develop a scalable, extensible firmware codebase
+
+---
 
 ## Features
+The turret is designed as a modular embedded platform with multiple layers of control. 
+At its core, it provides precise servo actuation for dual-axis movement. Input can come 
+from either physical hardware (a joystick) or a wireless client over Wi-Fi. 
 
--  **Dual-axis servo control** (pan and tilt)
--  Repeated movement: clockwise sweep followed by recentering
-- **GPIO control** for external devices (LEDs, future sensors)
-- Real-time scheduling with **FreeRTOS**
-- Ready for Wi-Fi integration via ESP32's built-in networking stack
+Key features include:
+- Dual-axis servo control (pan + tilt)
+- Joystick input (2-axis potentiometers mapped via ADC with 12-bit resolution)
+- Wi-Fi station mode for wireless connectivity
+- WebSocket server for low-latency, bidirectional control messages
+- PWM generation using LEDC peripheral (16-bit Q16 fixed-point format, 50 Hz)
+- Servo stability helpers: quantization handling, soft deadband, optional 1-Euro filter
+- GPIO expansion for LEDs, sensors, and future modules
+- FreeRTOS tasking model for responsive, non-blocking control
+
+---
+
+## System Architecture
+
+```mermaid
+flowchart TD
+    Joystick[Joystick Input (ADC)] --> ADC_Map[ADC Mapping → Servo Angle]
+    Web[WebSocket Control (Yaw/Pitch)] --> JSON_Parser[Minimal JSON Parser]
+    ADC_Map --> PWM[LEDC PWM Generator]
+    JSON_Parser --> PWM
+    PWM --> Servos[Pan-Tilt Servo Motors]
+```
+
+## Technical Highlights
+
+### Servo Control (PWM via LEDC)
+- Frequency: **50 Hz** (20 ms period)  
+- Pulse width range: **500–2500 µs → 0–180°**  
+- Q16 fixed-point duty cycle resolution (0–65535 counts)  
+- Conversion formula:  
+DutyCounts = (Pulse_us / Period_us) * 65536
 
 
-## Future Enhancements
-- Ultrasonic or IR distance sensors
-- Target tracking via AI/ML (e.g., TinyML / ESP32-CAM + OpenCV)
-- Joystick or web-based control (via WebSocket or Bluetooth)
-- Safety logic, status LEDs, and override controls
+### Joystick Input
+- 2-axis potentiometer joystick (X = yaw, Y = pitch)  
+- ADC configuration: **12-bit resolution (0–4095)** with **11 dB attenuation (~2.45V range)**  
+- Mapping:  
+Raw ADC → Servo Angle (0–180°) → Duty Counts
 
-##  Notes for Reviewers & Recruiters
-- This project was intentionally built with:
-- ESP-IDF and FreeRTOS to reflect industry-grade embedded development (beyond Arduino-level abstraction)
-- Emphasis on code clarity, modularity, and real-time control
-- Future extensibility: codebase is structured to allow integration of sensors, wireless control, and computer vision
-- The repository is self-contained and actively maintained, with room for growth into more advanced robotic control systems.
+
+
+### Wi-Fi & Networking
+- Mode: **Station (STA)**  
+- Initialization flow:  
+nvs_flash_init → esp_netif_init → esp_wifi_init → esp_wifi_set_mode → esp_wifi_start → esp_wifi_connect
+
+
+- Handles WPA2 authentication + DHCP assignment  
+
+### WebSocket Server
+- Built on top of ESP-IDF HTTP server  
+- URI endpoint: `/ws` with `is_websocket = true`  
+- Two-step frame handling (`httpd_ws_recv_frame` probe + full read)  
+- Sends/receives control packets (Yaw, Pitch) in near real time  
+- Minimal JSON-style parsing for performance  
+
+---
+
+## Potential Future Enhancements
+- Integrate ESP32-CAM for computer vision tracking  
+- Add autonomous target tracking (AI/ML)  
+- On-device filtering (1-Euro filter on ESP32 instead of frontend)  
+- WebSocket authentication & encryption  
+- Sensor-based auto-scan (ultrasonic/IR)  
+- Safety overrides + calibration routines  
+
+---
+
+## Notes for Reviewers & Recruiters
+This project was intentionally built with:  
+- **ESP-IDF + FreeRTOS** for professional-grade embedded development (beyond Arduino-level abstraction)  
+- **Hardware + software integration**, from analog input and PWM to Wi-Fi networking  
+- Emphasis on **modularity, clarity, and extensibility**  
+
+Demonstrated skills in:  
+- Embedded C / FreeRTOS task management  
+- Real-time signal processing and control loops  
+- Networking protocols (HTTP, WebSocket)  
+- Robotics and IoT system design  
+
+---
 
 ## Author
-Alexander Valdovinos Mena.
+**Alexander Valdovinos Mena**

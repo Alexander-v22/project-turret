@@ -9,20 +9,19 @@
 
 =======TODO LIST========
 
-0.5.) (OPTIONAL) added a mode switching between head control and joystick
+0.5.) (OPTIONAL) added a mode switching between head control and joystick done
 
 1.) alter the WS and HTTP funcions to read the JSON yaw and pitch 
-then give it to the servos 
+then give it to the servos (DONE)
 
-2.) add a LCD to display the mode that the turret is in
+1.5.) add a LCD to display the mode that the turret is in 
 
 3.) add a LED that turns on and off when you blink
     * also trigger this when click on the joystick
+(DONE)
 
 
 */
-
-
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/task.h"
@@ -126,6 +125,7 @@ uint8_t map_range(int x, int in_min, int in_max, int out_min, int out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+// Map for floating point numbers recieved from the front end  
 double map_d_range(double x, double in_min, double in_max, double out_min, double out_max) {
     if (x < in_min) x = in_min;
     if (x > in_max) x = in_max;
@@ -134,10 +134,7 @@ double map_d_range(double x, double in_min, double in_max, double out_min, doubl
 }
 
 
-//maybe use this one if not create another one but with double and then round to the nearset int depends on how pitch and yaw work
-
-
-// need a ws sever refresher
+// Need a ws sever refresher so that we can create a timeout if the WS connection fails 
 static inline uint32_t millis (){
     return (uint32_t)(esp_timer_get_time()/1000ULL);
 }
@@ -190,6 +187,8 @@ static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
 }
 
+
+
 // ===== ADC oneshot state (replaces legacy driver/adc.h) =====
 static adc_oneshot_unit_handle_t s_adc1 = nullptr;
 
@@ -211,24 +210,22 @@ static void setup_adc(void){
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, (adc_channel_t)JOY_Y_PIN, &ch_cfg));
 }
 
+//=========MODIFIED WEBSOCKET SERVER HELPER
 
-// getting the values from the frontend in format "EX: Yaw : 0 Pitch : 0"
-
-// break this down
 static bool json_get_number (const char* s, const char* key, double* out ){
-    const char* p  = std :: strstr(s, key);
-    if (!p) return false;
-    p = std::strchr(p, ':');
-    if(!p) return false;
+    const char* p  = std :: strstr(s, key); // prevents re-scanning by keeping a pointer onto the original buffer (Bookmark)
+    if (!p) return false; // Fail safe: early return ensuring the key is present to continue to *out
+    p = std::strchr(p, ':'); // won't match colon before key's location 
+    if(!p) return false; // Fail safe: early return again to make sure after the key text there is a colon 
 
-    char* endp = nullptr;
-    double v = std::strtod(p + 1, &endp);
-    if (endp == p + 1 )return false;
-    *out = v;
-    return true ;
+    char* endp = nullptr; // needed for std::strtod, this way it puts a place "where parsing stopped"
+    double v = std::strtod(p + 1, &endp); // (p + 1) skips colon and v is declared to ensure we dont touch *out unless parsing good 
+    if (endp == p + 1 )return false; // Fail safe: for every strtod controct if no conversion happend then endp is set to the same pointer 
+    *out = v;// finally setting out* to the value 
+    return true ; 
 }
 
-//=================WIFI SETUP==========================
+//=====================WIFI SETUP==========================
 static void wifi_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     switch (event_id)
@@ -290,7 +287,7 @@ static void wifi_init_sta(void) {
 
 
 //==========SETTING UP AN HTTP SERVER=============
-static httpd_handle_t g_server = nullptr; // keeps a global handle to the HTTP server instance which is need so we can later stop the server or register more endpoints
+static httpd_handle_t g_server = nullptr; // keeps a global handle to the HTTP server instance which is needed so we can later stop the server or register more endpoints
 static esp_err_t ws_handler(httpd_req_t* req); //handler funciton that will process WS events (messages)
 
 static void start_ws_server(){
@@ -379,8 +376,6 @@ static esp_err_t ws_handler(httpd_req_t* req){
         g_last_ws_ms = millis();
     
         ESP_LOGI(TAG_WS, "has_yaw=%d, has_pitch=%d, yaw=%.2f, pitch=%.2f", has_yaw, has_pitch, yaw_degrees, pitch_degrees);
-
-
     }
 
     return ESP_OK;
