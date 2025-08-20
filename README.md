@@ -56,6 +56,13 @@ Key features include:
 - FreeRTOS tasking model for responsive, non-blocking control
 
 ---
+### Control Modes and Indicators
+The turret supports two control modes selectable via on‑board buttons:
+
+- Joystick Mode: selected by the RED button; RED LED on.
+- WebSocket Mode: selected by the BLUE button; BLUE LED on.
+
+If no WebSocket message is received for 2000 ms, the system automatically falls back to Joystick Mode to ensure local control remains responsive.
 
 ## System Architecture
 
@@ -67,22 +74,24 @@ flowchart TD
     JSON_Parser --> PWM
     PWM --> Servos[Pan-Tilt Servo Motors]
 ```
-
+---
 ## Technical Highlights
 
 ### Servo Control (PWM via LEDC)
 - Frequency: **50 Hz** (20 ms period)  
 - Pulse width range: **500–2500 µs → 0–180°**  
 - Q16 fixed-point duty cycle resolution (0–65535 counts)  
-- Conversion formula:  
-DutyCounts = (Pulse_us / Period_us) * 65536
+- Conversion formula: DutyCounts = (Pulse_us / Period_us) * 65536
+- Practical angle range: **0–175°** (clamped in firmware to avoid end‑stop jamming)
 
 
 ### Joystick Input
 - 2-axis potentiometer joystick (X = yaw, Y = pitch)  
 - ADC configuration: **12-bit resolution (0–4095)** with **11 dB attenuation (~2.45V range)**  
-- Mapping:  
-Raw ADC → Servo Angle (0–180°) → Duty Counts
+- Mapping: Raw ADC → Servo Angle (0–180°) → Duty Counts
+- X (pan) mapping is inverted (0–4095 → 175–0) to match physical orientation
+- Y (tilt) mapping is normal (0–4095 → 0–175)
+
 
 
 
