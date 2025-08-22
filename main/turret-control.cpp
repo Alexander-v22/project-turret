@@ -55,6 +55,7 @@ extern "C" {
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 
 
@@ -63,7 +64,7 @@ extern "C" {
 #define SERVO_TILT_GPIO 19
 // NEEDED FOR THE ESP32 TO SEND SIGNALS TO TURN 
 #define SERVO_MIN_US 500
-#define SERVO_MAX_US 2500
+#define SERVO_MAX_US 2500 // New servos went from MG90S to MG955
 // STANDARD PWM FREQUENCY
 #define SERVO_FREQ_HZ 50
 // ESP32 HAS A LECD TIMER NEED FOR PWM OUTPUT CHANNEL
@@ -187,7 +188,19 @@ static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
 }
 
+static int g_joy_center_x = 2048;
+static int g_joy_center_y = 2048;
 
+static float ema(float x, float& s, float a){s = a*x + (1 - a)*s; return s;}
+
+static float apply_deadzone_norm(float v, float dz){
+    float abs_v = fabsf(v);
+    if (abs_v < dz ) return 0.0f; // output 0 (deadzone)
+    float sign  = (v > 0) - (v < 0); // yields (-1, 0, 1)
+    float out = (abs_v - dz)/ (1.0f -dz); // creating a continuous mapping at the deadzone
+    out = powf(out, 1.5f); // tames the first chunk of travel so we get micro-aim neer center (response curve)
+    return sign*out; 
+}
 
 // ===== ADC oneshot state (replaces legacy driver/adc.h) =====
 static adc_oneshot_unit_handle_t s_adc1 = nullptr;
@@ -348,27 +361,23 @@ static esp_err_t ws_handler(httpd_req_t* req){
     const char * msg = reinterpret_cast<const char*>(buf.data());
     ESP_LOGI(TAG_WS, "msg=%s", msg);
 
-    // break this down
 
     double yaw_degrees = 0.0;
     double pitch_degrees = 0.0; 
 
-    // break this down
-
     const bool has_yaw =json_get_number(msg,  "yaw", &yaw_degrees);
     const bool has_pitch =json_get_number(msg,  "pitch", &pitch_degrees);
 
-    // break this down
 
     if (has_yaw && has_pitch){
         const double pan_yaw = map_d_range(yaw_degrees, -MAX_YAW, +MAX_YAW, 0.0, 180);
-        const double tilt_pitch = map_d_range(pitch_degrees, -MAX_PITCH, +MAX_PITCH, 0.0, 180);
+        const double tilt_pitch = map_d_range(pitch_degrees, -MAX_PITCH, +MAX_PITCH, 180, 0);
 
         int pan = static_cast<int>(pan_yaw + 0.5);
         int tilt = static_cast<int>(tilt_pitch + 0.5);
 
-        pan = std::clamp(pan, 0, 175); // might change this value to 175 servo jams when fully going to 180
-        tilt = std::clamp(tilt, 0 ,175);
+        pan = std::clamp(pan, 0, 160); 
+        tilt = std::clamp(tilt, 0 ,160);
 
         g_pan_angle = static_cast<uint8_t>(pan);
         g_tilt_angle = static_cast<uint8_t>(tilt);
@@ -401,18 +410,37 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
     ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
-    // map_range # onto the servo
-    uint8_t pan_angle = map_range(joy_x, 0 , 4095, 0 ,175);
-    uint8_t tilt_angle = map_range(joy_y, 0, 4095, 0, 175);
 
+
+    static float x_filter = 0;
+    static float y_filter = 0;
+    const float EMA_A = 0.25f;            // 0..1, lower = smoother
+    const float DZ = 0.05f;               // 8% deadzone
+        
     while(1){
-    
+  
+        // read raw ADC outputs
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
+        // normalize around center to [-1, 1] (Finding the distance from the center)
+        float x_normalized = (joy_x - g_joy_center_x) / 2048.0f;
+        float y_normalized = (joy_y - g_joy_center_y) / 2048.0f;
+        // Then clamp around [-1, 1]
+        x_normalized = std::clamp(x_normalized, -1.2f, 1.2f);
+        y_normalized = std::clamp(y_normalized, -1.2f, 1.2f);
+
+        //low pass EMA to reduce jitter
+        x_normalized = ema(x_normalized, x_filter, EMA_A);
+        y_normalized = ema(y_normalized, y_filter, EMA_A);
+
+        //Zero out smaoll motions and apply a gentle curve to the rest 
+        x_normalized = apply_deadzone_norm(x_normalized, DZ);        
+        y_normalized = apply_deadzone_norm(y_normalized, DZ);
+
         //linear mappings from the ADC range to servo angle range
-        uint8_t pan_angle_js = map_range(joy_x, 0 , 4095, 175 ,0 );
-        uint8_t tilt_angle_js = map_range(joy_y, 0, 4095, 0, 175);
+        uint8_t pan_angle_js  = (uint8_t)std::lround( ( -x_normalized * 0.5f + 0.5f ) * 175.0f );
+        uint8_t tilt_angle_js = (uint8_t)std::lround( (  y_normalized * 0.5f + 0.5f ) * 175.0f );
 
         uint32_t now = millis();
 
@@ -436,6 +464,8 @@ extern "C" void app_main(void) {
         if(g_mode == CONTROL_MODE_WS && (now - g_last_ws_ms)> WS_TIMEOUT_MS) {
             g_mode = CONTROL_MODE_JOYSTICK;
             ESP_LOGW(TAG_WS,"WS Timeout switching into JOYSTICK MODE");
+            gpio_set_level(RED_LED_GPIO, 1);
+            gpio_set_level(BLUE_LED_GPIO, 0);
         }
 
 
