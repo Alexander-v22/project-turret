@@ -24,8 +24,8 @@ Together, these repos demonstrate **end-to-end system design**: computer vision,
 ## Hardware Photos
 
 <p align="center">
-  <img src="assets/side-view.jpeg" alt="Turret – side view" height="250">
   <img src="assets/front-turret-view.jpeg" alt="Turret – front view" height="250">
+  <img src="assets/side-view.jpeg" alt="Turret – side view" height="250">
   <img src="assets/breadboard.jpeg" alt="Breadboard overview" height="250">
   <img src="assets/joystick.jpeg" alt="Breadboard with joystick" height="250">
 </p>
