@@ -1,27 +1,5 @@
-/*
-=======IMPROVEMNTS========
-1.) add joystick improvemnts 
-    * joystick dead zones
-    * smoothness for contorl 
-    * calibration 
-    
-2.) improve wifi feedback (DONE)
-
-=======TODO LIST========
-
-0.5.) (OPTIONAL) added a mode switching between head control and joystick done
-
-1.) alter the WS and HTTP funcions to read the JSON yaw and pitch 
-then give it to the servos (DONE)
-
-1.5.) add a LCD to display the mode that the turret is in 
-
-3.) add a LED that turns on and off when you blink
-    * also trigger this when click on the joystick
-(DONE)
 
 
-*/
 extern "C" {
     #include "freertos/FreeRTOS.h"
     #include "freertos/task.h"

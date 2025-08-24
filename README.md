@@ -6,9 +6,7 @@
 ![WiFi](https://img.shields.io/badge/Connectivity-WiFi-lightgrey)
 ![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-purple)
 
-This project demonstrates a head-tracking turret inspired by the F-35 Lightning II’s helmet display system — combining computer vision, networking, and embedded real-time control on the ESP32.
-
-Built with **ESP-IDF + FreeRTOS** on the ESP32, the system integrates:  
+This project demonstrates a head-tracking turret inspired by the F-35 Lightning II’s helmet display system — combining computer vision, networking, and embedded real-time control on the ESP32.Built with **ESP-IDF + FreeRTOS** on the ESP32, the system integrates:  
 - **Inputs** → joystick (local) or computer vision (remote via WebSocket)  
 - **Processing** → filtering, deadzone handling, and failover logic  
 - **Outputs** → servo-driven pan-tilt turret with LED indicators  
@@ -34,13 +32,13 @@ Together, these repos demonstrate **end-to-end system design**: computer vision,
 
 ## Demo
 
-| Turret Sweep | Joystick Control | WebSocket Control |
+| Joystick Control | Websocket Control | Final Presentation |
 |--------------|-----------------|-------------------|
-| (Insert GIF here) | (Insert GIF here) | (Insert GIF here) |
+|<img src="assets/joystick-gif.gif" alt="Turret – front view" height="220">| (Insert GIF here) |   <img src="assets/overall.gif" alt="Breadboard with joystick" height="220">
 
-Video Walkthrough: [YouTube Demo](https://youtu.be/your-demo-link)
+**Video Walkthrough: [YouTube Demo](https://youtu.be/your-demo-link)**
 
----
+
 
 ## Purpose
 
