@@ -99,6 +99,10 @@ By completing this project, I demonstrated not just the hardware and firmware de
 
 ---
 
+## Technical Documentation
+
+For full engineering details — including **BOM, pinout, calibration, modes, FreeRTOS tasks, WebSocket schema, safety notes, and troubleshooting** — see the dedicated [TECHNICAL_README.md](./TECHNICAL_README.md).
+
 ## Author
 
 **Alexander Valdovinos Mena**
