@@ -65,11 +65,13 @@ extern "C" {
 // NEEDED FOR THE ESP32 TO SEND SIGNALS TO TURN 
 #define SERVO_MIN_US 500
 #define SERVO_MAX_US 2500 // New servos went from MG90S to MG955
+//Parameters that could have workd are 1000-2000
+
 // STANDARD PWM FREQUENCY
 #define SERVO_FREQ_HZ 50
 // ESP32 HAS A LECD TIMER NEED FOR PWM OUTPUT CHANNEL
 #define SERVO_TIMER LEDC_TIMER_0 
-// FOR SMOOTH AND PRECISE CONTROL 
+// FOR SMOOTH AND PRECISE CONTROL (resolution) 
 #define SERVO_RES LEDC_TIMER_16_BIT 
 
 
@@ -79,10 +81,10 @@ extern "C" {
 
 
 //DEFINING PUSH BUTTONS GPIO PINS
-
 #define BLUE_BTN GPIO_NUM_35
 #define RED_BTN GPIO_NUM_34
 
+//DEFINIG LED SIGNIFIERS FOR BTNS
 #define RED_LED_GPIO GPIO_NUM_23
 #define BLUE_LED_GPIO GPIO_NUM_22
 
@@ -103,19 +105,26 @@ static const char *TAG_MODE = "MODE: ";
 #define MAX_YAW 90.0
 #define MAX_PITCH 45.0
 
-//========
 
-typedef enum control_mode_t { CONTROL_MODE_JOYSTICK, CONTROL_MODE_WS}; 
+typedef enum control_mode_t { CONTROL_MODE_JOYSTICK, CONTROL_MODE_WS};
+// Want joystick mode to be our defualt mode  
 static volatile control_mode_t g_mode = CONTROL_MODE_JOYSTICK;
 
-static constexpr uint32_t WS_TIMEOUT_MS = 2000;
+//Need a fall back if WS control fails
+static constexpr uint32_t WS_TIMEOUT_MS = 3000;
+
+//90 degrees form the center
 static volatile uint8_t g_pan_angle = 90;
 static volatile uint8_t  g_tilt_angle = 90;
+
+//
 static volatile uint32_t  g_last_ws_ms = 0;
 
 
 // Map angle -> pulse_us (500–2500 us at 50 Hz -> 20ms), then convert to LEDC duty counts:
+
 // duty = (pulse_us / 20,000 us) * 2^16  // servos respond to pulse width, not raw duty %
+// but esp32's "lang" is in duty cycles 
 uint32_t angle_to_ledc_counts (uint8_t angle){
     uint32_t us = SERVO_MIN_US + ((SERVO_MAX_US - SERVO_MIN_US) * angle ) / 180;
     return (us * (1<<16)) / (1000000/ SERVO_FREQ_HZ); // Uses linear interpolation to calculate pulse width for the current angle.
@@ -126,7 +135,7 @@ uint8_t map_range(int x, int in_min, int in_max, int out_min, int out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-// Map for floating point numbers recieved from the front end  
+// Map for floating point numbers recieved from the front end 
 double map_d_range(double x, double in_min, double in_max, double out_min, double out_max) {
     if (x < in_min) x = in_min;
     if (x > in_max) x = in_max;
@@ -140,7 +149,6 @@ static inline uint32_t millis (){
     return (uint32_t)(esp_timer_get_time()/1000ULL);
 }
  
-
 //=========== ALL OF THESE ARE SETUPS FOR SERVO USE==================
 
 static void setup_ledc(void) {
@@ -178,8 +186,8 @@ static void setup_ledc(void) {
     ledc_channel_config(&tilt);
 }
 
-static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
-    uint32_t dpan = angle_to_ledc_counts(deg_pan);
+static void servo_update(uint8_t deg_pan, uint8_t deg_tilt){
+    uint32_t dpan = angle_to_ledc_counts(deg_pan); // these are the "Angles" of the servo = deg_tilt = Angle  then do math
     uint32_t dtilt = angle_to_ledc_counts(deg_tilt);
 
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dpan); //loads the value
@@ -188,19 +196,6 @@ static void servo_startup(uint8_t deg_pan, uint8_t deg_tilt){
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
 }
 
-static int g_joy_center_x = 2048;
-static int g_joy_center_y = 2048;
-
-static float ema(float x, float& s, float a){s = a*x + (1 - a)*s; return s;}
-
-static float apply_deadzone_norm(float v, float dz){
-    float abs_v = fabsf(v);
-    if (abs_v < dz ) return 0.0f; // output 0 (deadzone)
-    float sign  = (v > 0) - (v < 0); // yields (-1, 0, 1)
-    float out = (abs_v - dz)/ (1.0f -dz); // creating a continuous mapping at the deadzone
-    out = powf(out, 1.5f); // tames the first chunk of travel so we get micro-aim neer center (response curve)
-    return sign*out; 
-}
 
 // ===== ADC oneshot state (replaces legacy driver/adc.h) =====
 static adc_oneshot_unit_handle_t s_adc1 = nullptr;
@@ -333,7 +328,7 @@ static esp_err_t ws_handler(httpd_req_t* req){
     //  Responsible for signifying the intial HTTP request for a connection upgrade 
     if (req -> method == HTTP_GET){
         ESP_LOGI(TAG_WS, "WS Handshake");
-        return ESP_OK; // handshake done by ersver 
+        return ESP_OK; // handshake done by server 
     }
 
     httpd_ws_frame_t frame = {} ; // A httpd_ws_frame_t structure is initialized to hold information about the incoming WebSocket frame.
@@ -390,6 +385,23 @@ static esp_err_t ws_handler(httpd_req_t* req){
     return ESP_OK;
 }
 
+static int g_joy_center_x = 2048;
+static int g_joy_center_y = 2048;
+
+static float ema(float x, float& s, float a){
+    s = a*x + (1 - a)*s;
+    return s;
+}
+
+static float apply_deadzone_norm(float v, float dz){
+    float abs_v = fabsf(v);
+    if (abs_v < dz ) return 0.0f; // output 0 (deadzone)
+    float sign  = (v > 0) - (v < 0); // yields (-1, 0, 1)
+    float out = (abs_v - dz)/ (1.0f -dz); // creating a continuous mapping at the deadzone
+    out = powf(out, 1.5f); // tames the first chunk of travel so we get micro-aim neer center (response curve)
+    return sign*out; 
+}
+
 extern "C" void app_main(void) {
 
     setup_ledc();
@@ -414,7 +426,7 @@ extern "C" void app_main(void) {
 
     static float x_filter = 0;
     static float y_filter = 0;
-    const float EMA_A = 0.25f;            // 0..1, lower = smoother
+    const float EMA_A = 0.25f;            // 0..1, lower = smoother another smoothing factor 
     const float DZ = 0.05f;               // 8% deadzone
         
     while(1){
@@ -423,10 +435,10 @@ extern "C" void app_main(void) {
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_X_PIN, &joy_x));
         ESP_ERROR_CHECK(adc_oneshot_read(s_adc1, (adc_channel_t)JOY_Y_PIN, &joy_y));
 
-        // normalize around center to [-1, 1] (Finding the distance from the center)
+        // This firt clacs. a range from [-2, 2] but then we clamp it between [-1.2, 1.2] in the next line 
         float x_normalized = (joy_x - g_joy_center_x) / 2048.0f;
         float y_normalized = (joy_y - g_joy_center_y) / 2048.0f;
-        // Then clamp around [-1, 1]
+        // Then clamp around [-1.2, 1.2] changed from 1 -> 1.2 for a small errors
         x_normalized = std::clamp(x_normalized, -1.2f, 1.2f);
         y_normalized = std::clamp(y_normalized, -1.2f, 1.2f);
 
@@ -472,9 +484,10 @@ extern "C" void app_main(void) {
         uint8_t pan_angle  = (g_mode == CONTROL_MODE_WS) ? g_pan_angle  : pan_angle_js;
         uint8_t tilt_angle = (g_mode == CONTROL_MODE_WS) ? g_tilt_angle : tilt_angle_js;
 
-        servo_startup(pan_angle, tilt_angle);
+        servo_update(pan_angle, tilt_angle);
 
-        vTaskDelay(pdMS_TO_TICKS(30));
+        vTaskDelay(pdMS_TO_TICKS(30));// servos accept up to 50Hz PWM but we dont need to recompute angles that fast so we use 33hz to save CPU 
+        // increasing this will allows to reduce lag without extra chatter"
     
     }
 }

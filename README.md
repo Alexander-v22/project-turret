@@ -6,9 +6,29 @@
 ![WiFi](https://img.shields.io/badge/Connectivity-WiFi-lightgrey)
 ![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-purple)
 
+This project demonstrates a head-tracking turret inspired by the F-35 Lightning II’s helmet display system — combining computer vision, networking, and embedded real-time control on the ESP32.
 
-An ESP32-based dual-axis turret system built on the ESP-IDF framework and FreeRTOS.  
-The system uses servo motors for pan and tilt control, supports manual input via joystick, and provides a Wi-Fi + WebSocket interface for remote real-time control. This project demonstrates embedded systems design across hardware control, signal processing, networking, and system integration.
+Built with **ESP-IDF + FreeRTOS** on the ESP32, the system integrates:  
+- **Inputs** → joystick (local) or computer vision (remote via WebSocket)  
+- **Processing** → filtering, deadzone handling, and failover logic  
+- **Outputs** → servo-driven pan-tilt turret with LED indicators  
+
+Pairs with my **computer vision frontend repo**:  
+[project-turret-head-control](https://github.com/Alexander-v22/project-turret-head-control)  
+
+- **Frontend (Head Control Repo)** → Tracks head position using computer vision and sends yaw/pitch via WebSocket  
+- **Backend (This Repo)** → Receives data, drives servos, ensures safe & responsive control  
+
+Together, these repos demonstrate **end-to-end system design**: computer vision, networking, and embedded real-time actuation.  
+
+## Hardware Photos
+
+<p align="center">
+  <img src="assets/front-turret-view.jpeg" alt="Turret – front view" height="250">
+  <img src="assets/side-turret-view.jpeg" alt="Turret – side view" height="250">
+  <img src="assets/breadboard.jpeg" alt="Breadboard overview" height="250">
+  <img src="assets/joystick.jpeg" alt="Breadboard with joystick" height="250">
+</p>
 
 ---
 
@@ -24,117 +44,63 @@ Video Walkthrough: [YouTube Demo](https://youtu.be/your-demo-link)
 
 ## Purpose
 
-The primary goal of this project is to build a modular, real-time embedded control system on the ESP32 platform. It simulates a pan-tilt turret for surveillance or targeting, laying the foundation for more advanced features such as:
+The goal of this project is to design a **modular, real-time embedded control system** for vision-guided robotics.  
+While simplified, it explores the same concept as the F-35’s HMDS: translating human head motion into **precise servo actuation** for targeting and interaction.  
 
-- Object detection and computer vision (e.g., ESP32-CAM + OpenCV/TinyML)
-- Sensor-based automation (IR, ultrasonic, or PIR tracking)
-- Interactive remote control via web, mobile, or joystick
-
-This project was designed to:
-
-- Deepen familiarity with embedded systems programming using ESP-IDF
-- Gain hands-on experience with FreeRTOS task scheduling
-- Explore servo control via PWM (LEDC hardware peripheral)
-- Implement real-time networking with WebSockets
-- Develop a scalable, extensible firmware codebase
+Key objectives included:  
+- Hands-on experience with **ESP-IDF** and embedded C  
+- Practicing **real-time scheduling and concurrency** with FreeRTOS  
+- Implementing **servo control and filtering techniques** (PWM, EMA, deadzones)  
+- Developing a **scalable firmware architecture** for future extensions  
 
 ---
 
 ## Features
-The turret is designed as a modular embedded platform with multiple layers of control. 
-At its core, it provides precise servo actuation for dual-axis movement. Input can come 
-from either physical hardware (a joystick) or a wireless client over Wi-Fi. 
 
-Key features include:
-- Dual-axis servo control (pan + tilt)
-- Joystick input (2-axis potentiometers mapped via ADC with 12-bit resolution)
-- Wi-Fi station mode for wireless connectivity
-- WebSocket server for low-latency, bidirectional control messages
-- PWM generation using LEDC peripheral (16-bit Q16 fixed-point format, 50 Hz)
-- Servo stability helpers: quantization handling, soft deadband, optional 1-Euro filter
-- GPIO expansion for LEDs, sensors, and future modules
-- FreeRTOS tasking model for responsive, non-blocking control
+- **Joystick Mode** → Local manual control with filtering, deadzone handling, and calibration  
+- **WebSocket Mode** → Low-latency remote control, paired with computer vision frontend  
+- **Mode Switching & Failover** → Hardware buttons toggle source; automatic fallback to joystick if WebSocket drops  
+- **Real-Time Responsiveness** → FreeRTOS tasks ensure smooth, non-blocking control  
+- **Modular Design** → Separate layers for input handling, networking, servo drivers, and scheduling  
 
 ---
-### Control Modes and Indicators
-The turret supports two control modes selectable via on‑board buttons:
 
-- Joystick Mode: selected by the RED button; RED LED on.
-- WebSocket Mode: selected by the BLUE button; BLUE LED on.
-
-If no WebSocket message is received for 2000 ms, the system automatically falls back to Joystick Mode to ensure local control remains responsive.
-
-## System Architecture
-
-```mermaid
-flowchart TD
-    Joystick[Joystick Input (ADC)] --> ADC_Map[ADC Mapping → Servo Angle]
-    Web[WebSocket Control (Yaw/Pitch)] --> JSON_Parser[Minimal JSON Parser]
-    ADC_Map --> PWM[LEDC PWM Generator]
-    JSON_Parser --> PWM
-    PWM --> Servos[Pan-Tilt Servo Motors]
-```
----
 ## Technical Highlights
 
-### Servo Control (PWM via LEDC)
-- Frequency: **50 Hz** (20 ms period)  
-- Pulse width range: **500–2500 µs → 0–180°**  
-- Q16 fixed-point duty cycle resolution (0–65535 counts)  
-- Conversion formula: DutyCounts = (Pulse_us / Period_us) * 65536
-- Practical angle range: **0–175°** (clamped in firmware to avoid end‑stop jamming)
-
-
-### Joystick Input
-- 2-axis potentiometer joystick (X = yaw, Y = pitch)  
-- ADC configuration: **12-bit resolution (0–4095)** with **11 dB attenuation (~2.45V range)**  
-- Mapping: Raw ADC → Servo Angle (0–180°) → Duty Counts
-- X (pan) mapping is inverted (0–4095 → 175–0) to match physical orientation
-- Y (tilt) mapping is normal (0–4095 → 0–175)
-
-
-
-
-### Wi-Fi & Networking
-- Mode: **Station (STA)**  
-- Initialization flow:  
-nvs_flash_init → esp_netif_init → esp_wifi_init → esp_wifi_set_mode → esp_wifi_start → esp_wifi_connect
-
-
-- Handles WPA2 authentication + DHCP assignment  
-
-### WebSocket Server
-- Built on top of ESP-IDF HTTP server  
-- URI endpoint: `/ws` with `is_websocket = true`  
-- Two-step frame handling (`httpd_ws_recv_frame` probe + full read)  
-- Sends/receives control packets (Yaw, Pitch) in near real time  
-- Minimal JSON-style parsing for performance  
+- **Servo Control** → Dual-axis PWM via ESP32 LEDC @ 50 Hz with safe clamping  
+- **Joystick Input** → 12-bit ADC reads with exponential moving average (EMA) filtering and nonlinear response curve  
+- **Networking** → ESP32 in Wi-Fi Station mode, onboard WebSocket server for real-time control packets  
+- **Failover Logic** → Timeout detection reverts to joystick mode automatically  
+- **FreeRTOS Integration** → Task scheduling for responsive updates without blocking networking  
 
 ---
 
-## Potential Future Enhancements
-- Integrate ESP32-CAM for computer vision tracking  
-- Add autonomous target tracking (AI/ML)  
-- On-device filtering (1-Euro filter on ESP32 instead of frontend)  
-- WebSocket authentication & encryption  
-- Sensor-based auto-scan (ultrasonic/IR)  
-- Safety overrides + calibration routines  
+## What I Learned
+
+- Designing a **real-time control system** from hardware pins up to networking protocols  
+- Applying **signal processing** (EMA filters, deadzones, nonlinear response curves) for stability  
+- Managing **concurrency & responsiveness** with FreeRTOS tasks  
+- Bridging **computer vision inputs with embedded actuation** for human-guided robotics  
+- Presenting technical work in a way that’s clear to both engineers and recruiters  
 
 ---
 
-## Notes for Reviewers & Recruiters
-This project was intentionally built with:  
-- **ESP-IDF + FreeRTOS** for professional-grade embedded development (beyond Arduino-level abstraction)  
-- **Hardware + software integration**, from analog input and PWM to Wi-Fi networking  
-- Emphasis on **modularity, clarity, and extensibility**  
+## Impact & Applications
 
-Demonstrated skills in:  
-- Embedded C / FreeRTOS task management  
-- Real-time signal processing and control loops  
-- Networking protocols (HTTP, WebSocket)  
-- Robotics and IoT system design  
+This project demonstrates how **computer vision and embedded systems** can be combined to create responsive, human-guided robotics.  
+
+Applications include:  
+- **Defense & Aerospace** → Inspired by the F-35 HMDS, showing how head-tracking can guide sensors or weapons  
+- **Surveillance & Security** → Remote-operated pan-tilt turrets for cameras and sensors  
+- **Human-Robot Interaction** → Head or gesture-controlled robotic platforms  
+- **Research & Prototyping** → A testbed for experimenting with real-time control, filtering, and embedded networking  
+
+By completing this project, I demonstrated not just the hardware and firmware design, but also the ability to **integrate computer vision with embedded real-time actuation** — a foundation for more advanced robotic systems.  
 
 ---
 
 ## Author
+
 **Alexander Valdovinos Mena**
+
+
