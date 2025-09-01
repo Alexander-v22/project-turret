@@ -34,7 +34,7 @@ Together, these repos demonstrate **end-to-end system design**: computer vision,
 
 | Joystick Control | Websocket Control | Final Presentation |
 |--------------|-----------------|-------------------|
-|<img src="assets/joystick-gif.gif" alt="Turret – Joystick GIF" height="220">| |<img src="assets/headcontrol.gif" alt="Turret – Head Control GIF" height="220"> |   <img src="assets/overall.gif" alt="Turrert Final Presentation" height="220">
+|<img src="assets/joystick-gif.gif" alt="Turret – Joystick GIF" height="220">| <img src="assets/headcontrol.gif" alt="Turret – Head Control GIF" height="220"> |<img src="assets/overall.gif" alt="Turrert Final Presentation" height="220">
 
 **Video Walkthrough: [YouTube Demo](https://youtu.be/your-demo-link)**
 
