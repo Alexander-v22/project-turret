@@ -74,8 +74,8 @@ extern "C" {
 #define WS_PORT 81
 #define WS_PATH "/ws"
 static const char* TAG_WIFI = "WIFI_SETUP";
-static const char *TAG_WS = "ws";
-static const char *TAG_MODE = "MODE: ";
+static const char* TAG_WS = "ws";
+static const char* TAG_MODE = "MODE: ";
 
 
 //========== YAW AND PITCH ==========
@@ -104,8 +104,8 @@ static volatile uint32_t  g_last_ws_ms = 0;
 // duty = (pulse_us / 20,000 us) * 2^16  // servos respond to pulse width, not raw duty %
 // but esp32's "lang" is in duty cycles 
 uint32_t angle_to_ledc_counts (uint8_t angle){
-    uint32_t us = SERVO_MIN_US + ((SERVO_MAX_US - SERVO_MIN_US) * angle ) / 180;
-    return (us * (1<<16)) / (1000000/ SERVO_FREQ_HZ); // Uses linear interpolation to calculate pulse width for the current angle.
+    uint32_t us = SERVO_MIN_US + ((SERVO_MAX_US - SERVO_MIN_US) * angle ) / 180; // Uses linear interpolation to calculate pulse width for the current angle.
+    return (us * (1<<16)) / (1000000/ SERVO_FREQ_HZ); // Conversion so esp32 can use our angle in us
 }
 
 // Converting the analog joystick value(0-4095) to a servo anlges (0-180)
@@ -448,7 +448,8 @@ extern "C" void app_main(void) {
             gpio_set_level(RED_LED_GPIO, 0);
 
             g_mode = CONTROL_MODE_WS;
-            ESP_LOGW( TAG_MODE, "HEAD CONTROL");
+            ESP_LOGW( TAG_MODE, "HEAD CONTROL")
+            ;
         } 
 
         if(g_mode == CONTROL_MODE_WS && (now - g_last_ws_ms)> WS_TIMEOUT_MS) {
